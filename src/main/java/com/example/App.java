@@ -14,17 +14,15 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.ArrayAccessExpr;
-import com.github.javaparser.ast.expr.ArrayCreationExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
+import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
-import com.github.javaparser.ast.type.ArrayType;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
-import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.resolution.TypeSolver;
@@ -95,16 +93,17 @@ public class App {
     }
 
     private static class ArrayAccessModifier extends ModifierVisitor<Void> {
-        // Array initializers
-        @Override
-        public Visitable visit(VariableDeclarator n, Void arg) {
-            if (n.getInitializer().isPresent() && n.getInitializer().get() instanceof ArrayCreationExpr) {
-                // Remove the array initializer because array reads and writes will be issued
-                // through PathORAM.access
-                n.removeInitializer();
-            }
-            return super.visit(n, arg);
-        }
+        // // Array initializers
+        // @Override
+        // public Visitable visit(VariableDeclarator n, Void arg) {
+        // if (n.getInitializer().isPresent() && n.getInitializer().get() instanceof
+        // ArrayCreationExpr) {
+        // // Remove the array initializer because array reads and writes will be issued
+        // // through PathORAM.access
+        // n.removeInitializer();
+        // }
+        // return super.visit(n, arg);
+        // }
 
         // Array reads
         @Override
@@ -113,8 +112,17 @@ public class App {
                 Expression arrayName = n.getName();
                 Expression index = n.getIndex();
 
-                String blockId = arrayName.toString() + "[" + index.toString() + "]";
-                StringLiteralExpr blockIdExpr = new StringLiteralExpr(blockId);
+                MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf", NodeList.nodeList(index));
+
+                // "arrayName["
+                StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
+                // "arrayName[" + index.toString()
+                BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
+                        BinaryExpr.Operator.PLUS);
+                // "]"
+                StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
+                // "arrayName[" + index.toString() + "]"
+                BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
 
                 Expression optionalEmptyExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
