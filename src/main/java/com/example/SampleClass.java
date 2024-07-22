@@ -1,6 +1,7 @@
 package com.example;
 
 public class SampleClass {
+
     public static void main(String[] args) {
         String[] names = new String[2];
         names[0] = "Aaryan Shroff";
