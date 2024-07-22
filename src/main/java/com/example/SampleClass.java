@@ -1,24 +1,20 @@
 package com.example;
 
-import java.util.Optional;
-import java.nio.ByteBuffer;
-
 public class SampleClass {
 
   public static void main(String[] args) {
-    String[] names;
-    oram.access("names[0]", Optional.ofNullable("Aaryan Shroff".getBytes()), true);
-    oram.access("names[1]", Optional.ofNullable("John Doe".getBytes()), true);
-    System.out.println(new String(oram.access("names[0]", Optional.<byte[]>empty(), false).get()));
-    System.out.println(new String(oram.access("names[1]", Optional.<byte[]>empty(), false).get()));
-    int[] date;
-    oram.access("date[0]", Optional.ofNullable(ByteBuffer.allocate(4).putInt(18).array()), true);
-    oram.access("date[1]", Optional.ofNullable(ByteBuffer.allocate(4).putInt(7).array()), true);
-    oram.access("date[2]", Optional.ofNullable(ByteBuffer.allocate(4).putInt(2024).array()), true);
-    System.out.println(ByteBuffer.wrap(oram.access("date[0]", Optional.<byte[]>empty(), false).get()).getInt());
-    System.out.println(ByteBuffer.wrap(oram.access("date[1]", Optional.<byte[]>empty(), false).get()).getInt());
-    System.out.println(ByteBuffer.wrap(oram.access("date[2]", Optional.<byte[]>empty(), false).get()).getInt());
-  }
+    String[] names = new String[2];
+    names[0] = "Aaryan Shroff";
+    names[1] = "John Doe";
+    System.out.println(names[0]);
+    System.out.println(names[1]);
 
-  private static PathORAM oram = new PathORAM(10000);
+    int[] date = new int[3];
+    date[0] = 18;
+    date[1] = 7;
+    date[2] = 2024;
+    System.out.println(date[0]);
+    System.out.println(date[1]);
+    System.out.println(date[2]);
+  }
 }
