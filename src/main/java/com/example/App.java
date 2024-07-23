@@ -3,8 +3,12 @@ package com.example;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.ArrayCreationLevel;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.Modifier;
@@ -14,9 +18,11 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.ArrayAccessExpr;
+import com.github.javaparser.ast.expr.ArrayCreationExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
@@ -65,6 +71,14 @@ public class App {
         ModifierVisitor<?> arrayAccessVisitor = new ArrayAccessModifier();
         arrayAccessVisitor.visit(cu, null);
 
+        // Array methods
+        ModifierVisitor<?> arrayMethodVisitor = new ArrayMethodModifier();
+        arrayMethodVisitor.visit(cu, null);
+
+        // Array initializers
+        ModifierVisitor<?> arrayInitializerModifier = new ArrayInitializerModifier();
+        arrayInitializerModifier.visit(cu, null);
+
         System.out.println(cu.toString());
     }
 
@@ -92,18 +106,66 @@ public class App {
         return className;
     }
 
+    private static class ArrayMethodModifier extends ModifierVisitor<Void> {
+        private final Map<String, Expression> arrayLengths = new HashMap<>();
+
+        // Array initializers
+        // Do not remove the initializer yet because visit(FieldAccessExpr n, Void arg)
+        // expects the array variable to exist
+        @Override
+        public Visitable visit(VariableDeclarator n, Void arg) {
+            Optional<Expression> initializer = n.getInitializer();
+            String arrayName = n.getName().asString();
+
+            if (initializer.isPresent() && initializer.get() instanceof ArrayCreationExpr) {
+                ArrayCreationExpr arrayCreationExpr = (ArrayCreationExpr) initializer.get();
+                NodeList<ArrayCreationLevel> dimensions = arrayCreationExpr.getLevels();
+
+                if (!dimensions.isEmpty()) {
+                    ArrayCreationLevel firstDimension = dimensions.get(0);
+                    Optional<Expression> dimension = firstDimension.getDimension();
+                    Expression sizeExpression = dimension.get();
+                    arrayLengths.put(arrayName, sizeExpression);
+                }
+            }
+
+            return super.visit(n, arg);
+        }
+
+        // Array length
+        @Override
+        public Visitable visit(FieldAccessExpr n, Void arg) {
+            String fieldName = n.getName().asString();
+            if (fieldName.equals("length")) {
+                Expression scope = n.getScope();
+                ResolvedType scopeType = scope.calculateResolvedType();
+                if (scopeType.isArray()) {
+                    String arrayName = scope.toString();
+                    return arrayLengths.get(arrayName);
+                }
+            }
+            return super.visit(n, arg);
+        }
+    }
+
+    private static class ArrayInitializerModifier extends ModifierVisitor<Void> {
+        // Only call this Visitor if you no longer need the array variables to exist
+        // Visitors that depend on array variables existing will not work if this
+        // Visitor is called before them
+        @Override
+        public Visitable visit(VariableDeclarator n, Void arg) {
+            Optional<Expression> initializer = n.getInitializer();
+
+            if (initializer.isPresent() && initializer.get() instanceof ArrayCreationExpr) {
+                // If initializing an array, remove the variable declaration
+                return null;
+            }
+
+            return super.visit(n, arg);
+        }
+    }
+
     private static class ArrayAccessModifier extends ModifierVisitor<Void> {
-        // // Array initializers
-        // @Override
-        // public Visitable visit(VariableDeclarator n, Void arg) {
-        // if (n.getInitializer().isPresent() && n.getInitializer().get() instanceof
-        // ArrayCreationExpr) {
-        // // Remove the array initializer because array reads and writes will be issued
-        // // through PathORAM.access
-        // n.removeInitializer();
-        // }
-        // return super.visit(n, arg);
-        // }
 
         // Array reads
         @Override
@@ -166,8 +228,17 @@ public class App {
                         "ofNullable",
                         NodeList.nodeList(valueByteArrayExpr));
 
-                String blockId = arrayName.toString() + "[" + index.toString() + "]";
-                StringLiteralExpr blockIdExpr = new StringLiteralExpr(blockId);
+                MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf", NodeList.nodeList(index));
+
+                // "arrayName["
+                StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
+                // "arrayName[" + index.toString()
+                BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
+                        BinaryExpr.Operator.PLUS);
+                // "]"
+                StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
+                // "arrayName[" + index.toString() + "]"
+                BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
 
                 MethodCallExpr methodCall = new MethodCallExpr(
                         new NameExpr(ORAM_FIELD_NAME),
