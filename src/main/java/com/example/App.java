@@ -45,6 +45,7 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
+import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.printer.configuration.PrettyPrinterConfiguration;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.resolution.types.ResolvedType;
@@ -75,13 +76,18 @@ public class App {
 
         CompilationUnit cu = StaticJavaParser.parse(Files.newInputStream(filePath));
 
+        // Output the total size of all arrays
+        ArraySizeVisitor arraySizeVisitor = new ArraySizeVisitor();
+        cu.accept(arraySizeVisitor, null);
+        int oramSize = arraySizeVisitor.getTotalArraySize();
+
         // Imports
         addImports(cu);
 
         // ORAM field and initializer
         String className = getClassNameFromPath(filePath);
         ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
-        FieldDeclaration pathORAMFieldDeclaration = createPathORAMFieldDeclaration(10000);
+        FieldDeclaration pathORAMFieldDeclaration = createPathORAMFieldDeclaration(oramSize * 2); // * 2 for overhead
         classDeclaration.addMember(pathORAMFieldDeclaration);
 
         // Array accesses
@@ -211,6 +217,44 @@ public class App {
                         new BooleanLiteralExpr(isWrite)));
 
         return methodCall;
+    }
+
+    private static class ArraySizeVisitor extends VoidVisitorAdapter<Void> {
+        // TODO: Count array sizes in field declarations
+        // TODO: Count args array
+        private int totalArraySize = 0;
+
+        @Override
+        public void visit(VariableDeclarator vd, Void arg) {
+            super.visit(vd, arg);
+            if (vd.getInitializer().isPresent()) {
+                Expression initializer = vd.getInitializer().get();
+                if (initializer instanceof ArrayCreationExpr) {
+                    ArrayCreationExpr arrayCreationExpr = (ArrayCreationExpr) initializer;
+                    List<ArrayCreationLevel> levels = arrayCreationExpr.getLevels();
+                    for (ArrayCreationLevel level : levels) {
+                        if (level.getDimension().isPresent()) {
+                            String dimensionString = level.getDimension().get().toString();
+                            try {
+                                totalArraySize += Integer.parseInt(dimensionString);
+                            } catch (NumberFormatException e) {
+                                // TODO: Evaluate non-integer expressions
+                                // E.g.
+                                // int x = 3;
+                                // String[] names = new String[x];
+                                System.err
+                                        .println("Non-integer array size encountered processing " + vd.getName() + ": "
+                                                + dimensionString);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        public int getTotalArraySize() {
+            return totalArraySize;
+        }
     }
 
     private static class ArrayMethodModifier extends ModifierVisitor<Void> {
