@@ -46,15 +46,13 @@ import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
-import com.github.javaparser.printer.configuration.PrettyPrinterConfiguration;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 
-import javassist.bytecode.analysis.ControlFlow.Block;
-
 public class App {
+
     private static final String ORAM_FIELD_NAME = "oram";
     private static final String PATH_ORAM_CLASS_NAME = "PathORAM";
 
@@ -116,16 +114,20 @@ public class App {
             mainMethodBody.getStatements().addFirst(writeArgsArrayToORAMStmt);
         }
 
+        // If statements
+        ModifierVisitor<?> ifStmtVisitor = new IfStmtVisitor();
+        ifStmtVisitor.visit(cu, null);
+
         System.out.println(cu.toString());
     }
 
     private static Optional<MethodDeclaration> getMainMethodFromClassDecl(ClassOrInterfaceDeclaration classDecl) {
         List<MethodDeclaration> methods = classDecl.getMethods();
         for (MethodDeclaration method : methods) {
-            if (method.getNameAsString().equals("main") &&
-                    method.isStatic() &&
-                    method.getParameters().size() == 1 &&
-                    method.getParameter(0).getType().asString().equals("String[]")) {
+            if (method.getNameAsString().equals("main")
+                    && method.isStatic()
+                    && method.getParameters().size() == 1
+                    && method.getParameter(0).getType().asString().equals("String[]")) {
                 return Optional.of(method);
             }
         }
@@ -220,6 +222,7 @@ public class App {
     }
 
     private static class ArraySizeVisitor extends VoidVisitorAdapter<Void> {
+
         // TODO: Count array sizes in field declarations
         // TODO: Count args array
         private int totalArraySize = 0;
@@ -258,6 +261,7 @@ public class App {
     }
 
     private static class ArrayMethodModifier extends ModifierVisitor<Void> {
+
         private final Map<String, Expression> arrayLengths = new HashMap<>();
         private final Set<String> arrayNamesToSkip = new HashSet<>(Arrays.asList("args"));
 
@@ -303,6 +307,7 @@ public class App {
     }
 
     private static class ArrayInitializerModifier extends ModifierVisitor<Void> {
+
         // Only call this Visitor if you no longer need the array variables to exist
         // Visitors that depend on array variables existing will not work if this
         // Visitor is called before them
@@ -358,8 +363,8 @@ public class App {
                 Expression optionalEmptyExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
                         "empty").setTypeArguments(
-                                new ClassOrInterfaceType()
-                                        .setName("byte[]"));
+                        new ClassOrInterfaceType()
+                                .setName("byte[]"));
 
                 MethodCallExpr accessMethodCall = createORAMAccessMethodCall(blockIdExpr, optionalEmptyExpr, false);
 
