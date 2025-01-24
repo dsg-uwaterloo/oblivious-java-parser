@@ -145,10 +145,12 @@ public class IfStmtVisitor extends ModifierVisitor<Void> {
                     )
             );
 
-            BinaryExpr combined = new BinaryExpr(
-                    maskAndTrue,
-                    notMaskAndFalse,
-                    BinaryExpr.Operator.BINARY_OR
+            EnclosedExpr combined = new EnclosedExpr(
+                    new BinaryExpr(
+                            maskAndTrue,
+                            notMaskAndFalse,
+                            BinaryExpr.Operator.BINARY_OR
+                    )
             );
 
             // Convert back to boolean by comparing with 0L
