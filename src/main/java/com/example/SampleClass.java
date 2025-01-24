@@ -1,6 +1,7 @@
 package com.example;
 
 public class SampleClass {
+
     public static void main(String[] args) {
         if (args.length > 0) {
             System.out.println(args[0]);
@@ -26,6 +27,20 @@ public class SampleClass {
         sentence[1] = "World";
         for (int i = 0; i < sentence.length; i++) {
             System.out.println(sentence[i]);
+        }
+
+        // If condition example
+        int userAge = 22;
+        boolean operate = false;
+        if (userAge >= 19) {
+            operate = true;
+        }
+        System.out.println("Operate: " + operate);
+
+        // For loop example
+        int numVisits = 0;
+        for (int i = 0; i < numVisits; i++) {
+            System.out.println(i);
         }
     }
 }
