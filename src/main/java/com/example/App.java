@@ -45,6 +45,7 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
+import com.github.javaparser.ast.visitor.VoidVisitor;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.resolution.types.ResolvedType;
@@ -57,12 +58,13 @@ public class App {
     private static final String PATH_ORAM_CLASS_NAME = "PathORAM";
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1) {
-            System.out.println("Please provide a file path as an argument.");
+        if (args.length < 2) {
+            System.out.println("Usage: java App <input_file> <output_class_name>");
             System.exit(1);
         }
 
         String filePathStr = args[0];
+        String outputClassName = args[1];
         Path filePath = Paths.get(filePathStr);
 
         TypeSolver typeSolver = new ReflectionTypeSolver();
@@ -114,11 +116,25 @@ public class App {
             mainMethodBody.getStatements().addFirst(writeArgsArrayToORAMStmt);
         }
 
+        // For loops
+        // Two pass approach which is encapsulated within ForLoopVisitor::transform
+        ForLoopVisitor visitor = new ForLoopVisitor();
+        visitor.transform(cu);
+
         // If statements
-        ModifierVisitor<?> ifStmtVisitor = new IfStmtVisitor();
+        VoidVisitor<?> ifStmtVisitor = new IfStmtDummyVisitor();
         ifStmtVisitor.visit(cu, null);
 
-        System.out.println(cu.toString());
+        // Replace the class name
+        ClassOrInterfaceDeclaration classDecl = cu.getClassByName(className).orElseThrow();
+        classDecl.setName(outputClassName);
+
+        // Create output file path in the same directory as input file
+        Path outputPath = filePath.resolveSibling(outputClassName + ".java");
+
+        // Write the transformed code to the output file
+        Files.writeString(outputPath, cu.toString());
+        System.out.println("Transformed code written to: " + outputPath);
     }
 
     private static Optional<MethodDeclaration> getMainMethodFromClassDecl(ClassOrInterfaceDeclaration classDecl) {
