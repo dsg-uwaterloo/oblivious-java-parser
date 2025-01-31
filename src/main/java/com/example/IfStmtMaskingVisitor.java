@@ -31,7 +31,7 @@ import com.github.javaparser.resolution.types.ResolvedType;
  * A transformer that converts eligible if statements into branchless, oblivious
  * code using unique masks.
  */
-public class IfStmtVisitor extends ModifierVisitor<Void> {
+public class IfStmtMaskingVisitor extends ModifierVisitor<Void> {
 
     private static int maskCounter = 1; // Counter for unique mask variable names
 
