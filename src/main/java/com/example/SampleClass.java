@@ -30,12 +30,13 @@ public class SampleClass {
         }
 
         // If condition example
-        int userAge = 22;
-        boolean operate = false;
-        if (userAge >= 19) {
-            operate = true;
+        if (date[0] >= 18) {
+            date[0] = 1;
+            date[1] = 5;
+        } else if (date[0] >= 10) {
+            date[0] = 2;
         }
-        System.out.println("Operate: " + operate);
+        System.out.println("date[0]: " + date[0]);
 
         // For loop example
         int numVisits = 0;
