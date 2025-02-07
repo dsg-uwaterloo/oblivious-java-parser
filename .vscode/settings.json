@@ -1,3 +1,4 @@
 {
   "editor.formatOnSave": true,
+  "makefile.configureOnOpen": false, // If true, tries to configure C++ intellisense based on Makefile
 }
