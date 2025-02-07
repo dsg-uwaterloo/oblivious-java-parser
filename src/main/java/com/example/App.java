@@ -77,9 +77,11 @@ public class App {
         CompilationUnit cu = StaticJavaParser.parse(Files.newInputStream(filePath));
 
         // Output the total size of all arrays
-        ArraySizeVisitor arraySizeVisitor = new ArraySizeVisitor();
-        cu.accept(arraySizeVisitor, null);
-        int oramSize = arraySizeVisitor.getTotalArraySize();
+        // TODO: How to calculate ORAM size if array sizes depend on user input?
+        // ArraySizeVisitor arraySizeVisitor = new ArraySizeVisitor();
+        // cu.accept(arraySizeVisitor, null);
+        // int oramSize = arraySizeVisitor.getTotalArraySize();
+        int oramSize = 1_048_576;
 
         // Imports
         addImports(cu);
@@ -87,7 +89,7 @@ public class App {
         // ORAM field and initializer
         String className = getClassNameFromPath(filePath);
         ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
-        FieldDeclaration pathORAMFieldDeclaration = createPathORAMFieldDeclaration(oramSize * 2); // * 2 for overhead
+        FieldDeclaration pathORAMFieldDeclaration = createPathORAMFieldDeclaration(oramSize);
         classDeclaration.addMember(pathORAMFieldDeclaration);
 
         // Array accesses
@@ -239,8 +241,7 @@ public class App {
 
     private static class ArraySizeVisitor extends VoidVisitorAdapter<Void> {
 
-        // TODO: Count array sizes in field declarations
-        // TODO: Count args array
+        // This variable holds the total computed size.
         private int totalArraySize = 0;
 
         @Override
@@ -251,26 +252,33 @@ public class App {
                 if (initializer instanceof ArrayCreationExpr) {
                     ArrayCreationExpr arrayCreationExpr = (ArrayCreationExpr) initializer;
                     List<ArrayCreationLevel> levels = arrayCreationExpr.getLevels();
+                    // For multidimensional arrays, compute the product of dimensions.
+                    int product = 1;
+                    boolean valid = true;
                     for (ArrayCreationLevel level : levels) {
                         if (level.getDimension().isPresent()) {
                             String dimensionString = level.getDimension().get().toString();
                             try {
-                                totalArraySize += Integer.parseInt(dimensionString);
+                                int dim = Integer.parseInt(dimensionString);
+                                product *= dim;
                             } catch (NumberFormatException e) {
-                                // TODO: Evaluate non-integer expressions
-                                // E.g.
-                                // int x = 3;
-                                // String[] names = new String[x];
-                                System.err
-                                        .println("Non-integer array size encountered processing " + vd.getName() + ": "
-                                                + dimensionString);
+                                // When the expression is not a literal integer,
+                                // log an error note
+                                System.err.println("Non-integer array size encountered processing "
+                                        + vd.getName() + ": " + dimensionString);
+                                valid = false;
+                                break;
                             }
                         }
+                    }
+                    if (valid) {
+                        totalArraySize += product;
                     }
                 }
             }
         }
 
+        // Returns the computed total array size.
         public int getTotalArraySize() {
             return totalArraySize;
         }
@@ -357,81 +365,58 @@ public class App {
 
     private static class ArrayAccessModifier extends ModifierVisitor<Void> {
 
-        // Array reads
+        // Array reads (accessing an element like a[i] or a[i][j])
         @Override
         public Visitable visit(ArrayAccessExpr n, Void arg) {
             if (!isWrite(n)) {
-                Expression arrayName = n.getName();
-                Expression index = n.getIndex();
+                // Generate a composite key for multidimensional array accesses.
+                // For example, a[i][j] will produce key: "a[i][j]"
+                Expression keyExpr = generateKeyExpression(n);
 
-                MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf", NodeList.nodeList(index));
-
-                // "arrayName["
-                StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
-                // "arrayName[" + index.toString()
-                BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
-                        BinaryExpr.Operator.PLUS);
-                // "]"
-                StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
-                // "arrayName[" + index.toString() + "]"
-                BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
-
+                // If no value is provided (read), we use Optional.empty() in the call to oram.access
                 Expression optionalEmptyExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
-                        "empty").setTypeArguments(
-                        new ClassOrInterfaceType()
-                                .setName("byte[]"));
+                        "empty")
+                        .setTypeArguments(new ClassOrInterfaceType().setName("byte[]"));
 
-                MethodCallExpr accessMethodCall = createORAMAccessMethodCall(blockIdExpr, optionalEmptyExpr, false);
-
+                MethodCallExpr accessMethodCall = createORAMAccessMethodCall(keyExpr, optionalEmptyExpr, false);
                 MethodCallExpr getMethodCall = new MethodCallExpr(accessMethodCall, "get");
-                ResolvedType resolvedType = arrayName.calculateResolvedType();
-                Expression byteArrayParseExpr = createByteArrayDecodeExpr(getMethodCall, resolvedType);
 
+                // Use the resolved type of the array access itself.
+                // For a[i] (with a as int[]) this returns int,
+                // while for a[i][j] (with a as int[][]) it returns int.
+                ResolvedType resolvedType = n.calculateResolvedType();
+                Expression byteArrayParseExpr = createByteArrayDecodeExpr(getMethodCall, resolvedType);
                 return byteArrayParseExpr;
             }
-
             return super.visit(n, arg);
         }
 
-        // Array write
+        // Array writes (assignments such as a[i] = ... or a[i][j] = ...)
         @Override
         public Visitable visit(AssignExpr n, Void arg) {
             Expression target = n.getTarget();
             if (target instanceof ArrayAccessExpr) {
                 ArrayAccessExpr arrayAccessExpr = (ArrayAccessExpr) target;
-                Expression arrayName = arrayAccessExpr.getName();
-                Expression index = arrayAccessExpr.getIndex();
-
-                // Value conversions
                 Expression value = n.getValue();
-                ResolvedType resolvedType = arrayName.calculateResolvedType();
+
+                // Use the type of the full array access;
+                // e.g. for a[i][j] with a as int[][], we want the int conversion.
+                ResolvedType resolvedType = arrayAccessExpr.calculateResolvedType();
                 Expression valueByteArrayExpr = createByteArrayExpr(value, resolvedType);
                 Expression optionalValueByteArrayExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
                         "ofNullable",
                         NodeList.nodeList(valueByteArrayExpr));
 
-                MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf", NodeList.nodeList(index));
-
-                // "arrayName["
-                StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
-                // "arrayName[" + index.toString()
-                BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
-                        BinaryExpr.Operator.PLUS);
-                // "]"
-                StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
-                // "arrayName[" + index.toString() + "]"
-                BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
-
-                MethodCallExpr methodCall = createORAMAccessMethodCall(blockIdExpr, optionalValueByteArrayExpr, true);
-
+                Expression keyExpr = generateKeyExpression(arrayAccessExpr);
+                MethodCallExpr methodCall = createORAMAccessMethodCall(keyExpr, optionalValueByteArrayExpr, true);
                 return methodCall;
             }
-
             return super.visit(n, arg);
         }
 
+        // Determines if an array access is on the left-hand side of an assignment.
         private static boolean isWrite(ArrayAccessExpr n) {
             Node parent = n.getParentNode().orElse(null);
             if (parent instanceof AssignExpr) {
@@ -441,84 +426,90 @@ public class App {
             return false;
         }
 
+        // Helper method that recursively builds the key for an array access.
+        // For a one-dimensional array access a[i] the key is:
+        //    "a" + "[" + String.valueOf(i) + "]"
+        // For a two-dimensional access a[i][j] it recursively creates:
+        //    (generateKeyExpression(a[i])) + "[" + String.valueOf(j) + "]"
+        private static Expression generateKeyExpression(ArrayAccessExpr expr) {
+            Expression arrayPart = expr.getName();
+            Expression index = expr.getIndex();
+            // Build String.valueOf(index)
+            MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf", NodeList.nodeList(index));
+            StringLiteralExpr openBracket = new StringLiteralExpr("[");
+            StringLiteralExpr closeBracket = new StringLiteralExpr("]");
+
+            if (arrayPart instanceof ArrayAccessExpr) {
+                Expression innerKey = generateKeyExpression((ArrayAccessExpr) arrayPart);
+                BinaryExpr keyWithOpen = new BinaryExpr(innerKey, openBracket, BinaryExpr.Operator.PLUS);
+                BinaryExpr keyWithIndex = new BinaryExpr(keyWithOpen, stringValueOfCall, BinaryExpr.Operator.PLUS);
+                return new BinaryExpr(keyWithIndex, closeBracket, BinaryExpr.Operator.PLUS);
+            } else {
+                // Base case: if the array part is not an ArrayAccessExpr,
+                // assume it is the variable or field name.
+                String baseName = arrayPart.toString();
+                StringLiteralExpr baseNameLiteral = new StringLiteralExpr(baseName);
+                BinaryExpr keyWithOpen = new BinaryExpr(baseNameLiteral, openBracket, BinaryExpr.Operator.PLUS);
+                BinaryExpr keyWithIndex = new BinaryExpr(keyWithOpen, stringValueOfCall, BinaryExpr.Operator.PLUS);
+                return new BinaryExpr(keyWithIndex, closeBracket, BinaryExpr.Operator.PLUS);
+            }
+        }
     }
 
-    private static Expression createByteArrayExpr(Expression valueExpr, ResolvedType arrayResolvedType) {
-        String arrayTypeDescription = arrayResolvedType.describe();
-        System.out.println("createByteArrayExpr " + arrayTypeDescription);
-
-        if (arrayTypeDescription.equals("int[]")) {
+    private static Expression createByteArrayExpr(Expression valueExpr, ResolvedType resolvedType) {
+        String typeDescription = resolvedType.describe();
+        System.out.println("createByteArrayExpr " + typeDescription);
+        // Support both 1d and element types for 2d arrays.
+        if (typeDescription.equals("int") || typeDescription.equals("int[]")) {
             return createIntToByteArrayExpr(valueExpr);
-        } else if (arrayTypeDescription.equals("java.lang.String[]")) {
+        } else if (typeDescription.equals("java.lang.String") || typeDescription.equals("java.lang.String[]")) {
             return createStringToByteArrayExpr(valueExpr);
         }
-
         return valueExpr;
     }
 
     private static Expression createIntToByteArrayExpr(Expression valueExpr) {
-        // ByteBuffer.allocate(4)
+        // Equivalent to: ByteBuffer.allocate(4).putInt(valueExpr).array()
         MethodCallExpr allocateCall = new MethodCallExpr(
                 new NameExpr("ByteBuffer"),
                 "allocate",
-                NodeList.<Expression>nodeList(new IntegerLiteralExpr("4")));
-
-        // ByteBuffer.allocate(4).putInt(valueExpression)
+                NodeList.<Expression>nodeList(new IntegerLiteralExpr("4"))
+        );
         MethodCallExpr putIntCall = new MethodCallExpr(
                 allocateCall,
                 "putInt",
-                NodeList.nodeList(valueExpr));
-
-        // ByteBuffer.allocate(4).putInt(valueExpression).array()
-        MethodCallExpr arrayCall = new MethodCallExpr(
-                putIntCall,
-                "array");
-
-        return arrayCall;
+                NodeList.<Expression>nodeList(valueExpr));
+        return new MethodCallExpr(putIntCall, "array");
     }
 
     private static Expression createStringToByteArrayExpr(Expression valueExpr) {
-        // valueExpr.getBytes()
-        MethodCallExpr getBytesCall = new MethodCallExpr(
-                valueExpr,
-                "getBytes");
-
-        return getBytesCall;
+        // Equivalent to: valueExpr.getBytes()
+        return new MethodCallExpr(valueExpr, "getBytes");
     }
 
-    private static Expression createByteArrayDecodeExpr(Expression valueExpr, ResolvedType arrayResolvedType) {
-        String arrayTypeDescription = arrayResolvedType.describe();
-        System.out.println("createByteArrayDecodeExpr " + arrayTypeDescription);
-        if (arrayTypeDescription.equals("int[]")) {
+    private static Expression createByteArrayDecodeExpr(Expression valueExpr, ResolvedType resolvedType) {
+        String typeDescription = resolvedType.describe();
+        System.out.println("createByteArrayDecodeExpr " + typeDescription);
+        if (typeDescription.equals("int") || typeDescription.equals("int[]")) {
             return createByteArrayToIntExpr(valueExpr);
-        } else if (arrayTypeDescription.equals("java.lang.String[]")) {
+        } else if (typeDescription.equals("java.lang.String") || typeDescription.equals("java.lang.String[]")) {
             return createByteArrayToStringExpr(valueExpr);
         }
-
         return valueExpr;
     }
 
     private static Expression createByteArrayToIntExpr(Expression valueExpr) {
-        // ByteBuffer.wrap(valueExpr)
+        // Equivalent to: ByteBuffer.wrap(valueExpr).getInt()
         MethodCallExpr wrapCall = new MethodCallExpr(
-                new NameExpr("ByteBuffer"),
-                "wrap",
-                NodeList.nodeList(valueExpr));
-
-        // ByteBuffer.wrap(valueExpr).getInt()
-        MethodCallExpr getIntCall = new MethodCallExpr(
-                wrapCall,
-                "getInt");
-
-        return getIntCall;
+                new NameExpr("ByteBuffer"), "wrap", NodeList.nodeList(valueExpr));
+        return new MethodCallExpr(wrapCall, "getInt");
     }
 
     private static Expression createByteArrayToStringExpr(Expression valueExpr) {
+        // Equivalent to: new String(valueExpr)
         ObjectCreationExpr newStringExpr = new ObjectCreationExpr();
         newStringExpr.setType("String");
         newStringExpr.addArgument(valueExpr);
-
         return newStringExpr;
     }
-
 }
