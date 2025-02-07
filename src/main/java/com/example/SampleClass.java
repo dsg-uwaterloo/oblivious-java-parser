@@ -43,5 +43,25 @@ public class SampleClass {
         for (int i = 0; i < numVisits; i++) {
             System.out.println(i);
         }
+
+        // 2D array example
+        int r = 10;
+        int c = 5;
+        int[][] matrix = new int[r][c];
+
+        int count = 0;
+        for (int i = 0; i < r; i++) {
+            for (int j = 0; j < c; j++) {
+                matrix[i][j] = count;
+                count++;
+            }
+        }
+
+        for (int i = 0; i < r; i++) {
+            for (int j = 0; j < c; j++) {
+                System.out.print(matrix[i][j] + " ");
+            }
+            System.out.print('\n');
+        }
     }
 }
