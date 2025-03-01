@@ -35,7 +35,7 @@ public class ORAMTest {
         oram.access("Y", Optional.ofNullable(ByteBuffer.allocate(4).putInt(25).array()), true);
         oram.access("Z", Optional.ofNullable(ByteBuffer.allocate(4).putInt(26).array()), true);
 
-        System.out.println(oram.access("F", Optional.empty(), false).get());
+        System.out.println(oram.access("F", Optional.<byte[]>empty(), false).get());
         oram.prettyPrintTree();
         oram.printPositionMap();
     }
