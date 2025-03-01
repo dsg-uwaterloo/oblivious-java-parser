@@ -18,6 +18,7 @@ public class PathORAM {
     private int treeHeight;
 
     public PathORAM(int numBlocks) {
+        // Compute tree height from the number of blocks (at least 1)
         this.treeHeight = Math.max(1, (int) Math.ceil(Math.log(numBlocks) / Math.log(2)));
         int numBuckets = (1 << (treeHeight + 1)) - 1;
 
@@ -25,17 +26,11 @@ public class PathORAM {
         for (int i = 0; i < numBuckets; i++) {
             tree.add(new Bucket());
         }
-
-        // // Initialize the position map for each block
-        // for (int i = 0; i < numBlocks; i++) {
-        //     String blockId = String.valueOf(i);
-        //     int leafIndex = random.nextInt(1 << treeHeight);
-        //     positionMap.put(blockId, leafIndex);
-        // }
     }
 
     public Optional<byte[]> access(String blockId, Optional<byte[]> newData, boolean isWrite) {
         // Step 1: Remap block
+        // (If blockId is not yet in the positionMap, assign it a random leaf.)
         Integer prevBlockPos = positionMap.getOrDefault(blockId, random.nextInt(1 << treeHeight) + 1);
         positionMap.put(blockId, random.nextInt(1 << treeHeight) + 1);
 
@@ -53,7 +48,13 @@ public class PathORAM {
 
         stash.put(blockId, block);
 
+        // Write the path back to the tree.
         writePath(prevBlockPos);
+
+        // After the standard write, check if the stash has grown beyond a threshold.
+        if (stash.size() > 4 * BUCKET_SIZE * treeHeight) {
+            resizeTree();
+        }
 
         return response;
     }
@@ -64,6 +65,7 @@ public class PathORAM {
             int bucketIdx = computeIdxOfBucketOnThisLevelOnPathToLeaf(level, leafPos);
             blocksOnPath.addAll(tree.get(bucketIdx - 1).popAllBlocks());
         }
+        // Place any non-dummy block from the read path into the stash.
         for (Block block : blocksOnPath) {
             if (block.id != null) {
                 stash.put(block.id, block);
@@ -73,6 +75,7 @@ public class PathORAM {
     }
 
     private void writePath(int leafPos) {
+        // For each level on the path from the root down to the leaf...
         for (int level = treeHeight - 1; level >= 0; level--) {
             int idxOfBucketOnThisLevelOnPathToLeaf = computeIdxOfBucketOnThisLevelOnPathToLeaf(level, leafPos);
             List<Block> blocksForBucket = new ArrayList<>();
@@ -101,7 +104,7 @@ public class PathORAM {
 
             // Fill remaining slots with dummy blocks
             while (newBucket.blocks.size() < BUCKET_SIZE) {
-                newBucket.blocks.add(new Block(null, Optional.empty()));
+                newBucket.blocks.add(new Block(null, Optional.<byte[]>empty()));
             }
 
             // Update the tree with the new bucket
@@ -109,8 +112,53 @@ public class PathORAM {
         }
     }
 
+    /**
+     * Computes the 1-based index of the bucket at a given level along the path
+     * for a given leaf position. (The tree is stored in a 0-based list, so the
+     * bucket index is adjusted later.)
+     */
     private int computeIdxOfBucketOnThisLevelOnPathToLeaf(int level, int leafPos) {
         return (leafPos + (1 << (treeHeight - 1))) >> (treeHeight - 1 - level);
+    }
+
+    private void resizeTree() {
+        // Step 1: Gather all blocks (from both the tree and the stash)
+        Map<String, Block> allBlocks = new HashMap<>();
+        for (Bucket bucket : tree) {
+            for (Block block : bucket.blocks) {
+                if (block.id != null) {
+                    allBlocks.put(block.id, block);
+                }
+            }
+        }
+        for (Map.Entry<String, Block> entry : stash.entrySet()) {
+            allBlocks.put(entry.getKey(), entry.getValue());
+        }
+
+        // Step 2: Increase tree height by 1.
+        treeHeight++;
+
+        // Step 3: Replace the tree with a bigger tree
+        tree.clear();
+        int newNumBuckets = (1 << (treeHeight + 1)) - 1;
+        for (int i = 0; i < newNumBuckets; i++) {
+            tree.add(new Bucket());
+        }
+
+        // Step 4: Clear the stash and assign each block a new random leaf (using the new tree height).
+        stash.clear();
+        for (Block block : allBlocks.values()) {
+            int newLeaf = random.nextInt(1 << treeHeight);
+            positionMap.put(block.id, newLeaf);
+            stash.put(block.id, block);
+        }
+
+        // Step 5: Flush all blocks from the stash into the new tree.
+        int numLeaves = 1 << treeHeight;
+        for (int leaf = 0; leaf < numLeaves; leaf++) {
+            readPath(leaf); // If the path is not read first, then previously inserted blocks will get lost (instead of being moved to the stack)
+            writePath(leaf);
+        }
     }
 
     public void prettyPrintTree() {
@@ -129,7 +177,10 @@ public class PathORAM {
         for (int i = 0; i < tree.size(); i++) {
             int bucketNumber = i + 1; // Convert to 1-based index
             int level = 31 - Integer.numberOfLeadingZeros(bucketNumber);
-            levelMap.computeIfAbsent(level, k -> new ArrayList<>()).add(tree.get(i));
+            if (!levelMap.containsKey(level)) {
+                levelMap.put(level, new ArrayList<Bucket>());
+            }
+            levelMap.get(level).add(tree.get(i));
             if (level > maxLevel) {
                 maxLevel = level;
             }
@@ -137,7 +188,7 @@ public class PathORAM {
 
         // Print each level's buckets
         for (int level = 0; level <= maxLevel; level++) {
-            List<Bucket> buckets = levelMap.getOrDefault(level, Collections.emptyList());
+            List<Bucket> buckets = levelMap.getOrDefault(level, Collections.<Bucket>emptyList());
             if (buckets.isEmpty()) {
                 continue;
             }
