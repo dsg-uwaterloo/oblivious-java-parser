@@ -43,6 +43,7 @@ import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ArrayType;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.PrimitiveType;
+import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.ast.visitor.VoidVisitor;
@@ -86,12 +87,6 @@ public class App {
         // Imports
         addImports(cu);
 
-        // ORAM field and initializer
-        String className = getClassNameFromPath(filePath);
-        ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
-        FieldDeclaration pathORAMFieldDeclaration = createPathORAMFieldDeclaration(oramSize);
-        classDeclaration.addMember(pathORAMFieldDeclaration);
-
         // Array accesses
         ModifierVisitor<?> arrayAccessVisitor = new ArrayAccessModifier();
         arrayAccessVisitor.visit(cu, null);
@@ -110,12 +105,21 @@ public class App {
         // Note: This needs to be after array access modifications so that args array
         // accesses **when inserting its elements into the ORAM tree** do not get
         // modified
-        Optional<MethodDeclaration> maybeMainMethodDecl = getMainMethodFromClassDecl(classDeclaration);
-        if (maybeMainMethodDecl.isPresent()) {
-            MethodDeclaration mainMethodDecl = maybeMainMethodDecl.get();
-            BlockStmt mainMethodBody = mainMethodDecl.getBody().orElseThrow();
-            ForStmt writeArgsArrayToORAMStmt = createWriteArrayToORAM("args");
-            mainMethodBody.getStatements().addFirst(writeArgsArrayToORAMStmt);
+        String className = getClassNameFromPath(filePath);
+        ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
+        // Optional<MethodDeclaration> maybeMainMethodDecl = getMainMethodFromClassDecl(classDeclaration);
+        // if (maybeMainMethodDecl.isPresent()) {
+        //     MethodDeclaration mainMethodDecl = maybeMainMethodDecl.get();
+        //     BlockStmt mainMethodBody = mainMethodDecl.getBody().orElseThrow();
+        //     ResolvedType argsType = mainMethodDecl.getParameter(0).getType().resolve();
+        //     ResolvedType argsElementType = argsType.asArrayType().getComponentType();
+        //     ForStmt writeArgsArrayToORAMStmt = createWriteArrayToORAM("args", argsElementType);
+        //     mainMethodBody.getStatements().add(1, writeArgsArrayToORAMStmt);
+        // }
+
+        // Add ORAM local variable to each method
+        for (MethodDeclaration method : classDeclaration.getMethods()) {
+            addORAMLocalVariableToMethod(method, oramSize);
         }
 
         // For loops
@@ -127,6 +131,10 @@ public class App {
         VoidVisitor<?> ifStmtVisitor = new IfStmtDummyVisitor();
         ifStmtVisitor.visit(cu, null);
 
+        // Method return values
+        ModifierVisitor<?> methodReturnVisitor = new MethodReturnValueVisitor();
+        methodReturnVisitor.visit(cu, null);
+
         // Replace the class name
         ClassOrInterfaceDeclaration classDecl = cu.getClassByName(className).orElseThrow();
         classDecl.setName(outputClassName);
@@ -137,6 +145,54 @@ public class App {
         // Write the transformed code to the output file
         Files.writeString(outputPath, cu.toString());
         System.out.println("Transformed code written to: " + outputPath);
+    }
+
+    private static void addORAMLocalVariableToMethod(MethodDeclaration method, int oramSize) {
+        if (!method.getBody().isPresent()) {
+            return;
+        }
+        BlockStmt body = method.getBody().get();
+        ObjectCreationExpr initializer = new ObjectCreationExpr()
+                .setType(PATH_ORAM_CLASS_NAME)
+                .addArgument(new IntegerLiteralExpr(String.valueOf(oramSize)));
+        VariableDeclarator varDeclarator = new VariableDeclarator(
+                new ClassOrInterfaceType(PATH_ORAM_CLASS_NAME),
+                ORAM_FIELD_NAME,
+                initializer);
+        VariableDeclarationExpr varDeclExpr = new VariableDeclarationExpr(varDeclarator);
+        ExpressionStmt varDeclStmt = new ExpressionStmt(varDeclExpr);
+        body.addStatement(0, varDeclStmt);
+
+        int insertIndex = 1;
+        for (com.github.javaparser.ast.body.Parameter param : method.getParameters()) {
+            String paramName = param.getNameAsString();
+            ResolvedType paramType;
+            try {
+                paramType = param.getType().resolve();
+            } catch (Exception e) {
+                System.err.println("Could not resolve type for parameter " + paramName + " in method " + method.getName());
+                continue;
+            }
+
+            if (paramType.isArray()) {
+                ResolvedType elementType = paramType.asArrayType().getComponentType();
+                ForStmt loopStmt = createWriteArrayToORAM(paramName, elementType);
+                body.addStatement(insertIndex, loopStmt);
+                insertIndex++;
+            } else {
+                StringLiteralExpr keyExpr = new StringLiteralExpr(paramName);
+                Expression paramValueExpr = new NameExpr(paramName);
+                Expression byteArrayExpr = createByteArrayExpr(paramValueExpr, paramType);
+                Expression optionalValueExpr = new MethodCallExpr(
+                        new NameExpr("Optional"),
+                        "ofNullable",
+                        NodeList.nodeList(byteArrayExpr));
+                MethodCallExpr oramAccessCall = createORAMAccessMethodCall(keyExpr, optionalValueExpr, true);
+                ExpressionStmt stmt = new ExpressionStmt(oramAccessCall);
+                body.addStatement(insertIndex, stmt);
+                insertIndex++;
+            }
+        }
     }
 
     private static Optional<MethodDeclaration> getMainMethodFromClassDecl(ClassOrInterfaceDeclaration classDecl) {
@@ -152,31 +208,26 @@ public class App {
         return Optional.empty();
     }
 
-    private static ForStmt createWriteArrayToORAM(String arrayName) {
+    private static ForStmt createWriteArrayToORAM(String arrayName, ResolvedType elementType) {
         ForStmt forStmt = new ForStmt();
-        // int i = 0
         VariableDeclarator iEqualsZero = new VariableDeclarator(PrimitiveType.intType(), "i",
                 new IntegerLiteralExpr("0"));
         NodeList<Expression> initializationExprs = NodeList
                 .<Expression>nodeList(new VariableDeclarationExpr(iEqualsZero));
-        forStmt.setInitialization(
-                initializationExprs);
+        forStmt.setInitialization(initializationExprs);
 
-        // i < args.length
         BinaryExpr compareExpr = new BinaryExpr(
                 new NameExpr("i"),
                 new FieldAccessExpr(new NameExpr(arrayName), "length"),
                 BinaryExpr.Operator.LESS);
         forStmt.setCompare(compareExpr);
 
-        // i++
         UnaryExpr iIncrement = new UnaryExpr(new NameExpr("i"), UnaryExpr.Operator.POSTFIX_INCREMENT);
         NodeList<Expression> updateExprs = NodeList.<Expression>nodeList(iIncrement);
         forStmt.setUpdate(updateExprs);
 
-        // TODO: DRY
         Expression arrayAccessExpr = new ArrayAccessExpr(new NameExpr(arrayName), new NameExpr("i"));
-        Expression valueByteArrayExpr = createStringToByteArrayExpr(arrayAccessExpr);
+        Expression valueByteArrayExpr = createByteArrayExpr(arrayAccessExpr, elementType);
         Expression optionalValueByteArrayExpr = new MethodCallExpr(
                 new NameExpr("Optional"),
                 "ofNullable",
@@ -185,14 +236,10 @@ public class App {
         MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf",
                 NodeList.<Expression>nodeList(new NameExpr("i")));
 
-        // "arrayName["
         StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
-        // "arrayName[" + index.toString()
         BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
                 BinaryExpr.Operator.PLUS);
-        // "]"
         StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
-        // "arrayName[" + index.toString() + "]"
         BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
 
         MethodCallExpr oramAccessMethodCall = createORAMAccessMethodCall(blockIdExpr, optionalValueByteArrayExpr, true);
@@ -237,6 +284,45 @@ public class App {
                         new BooleanLiteralExpr(isWrite)));
 
         return methodCall;
+    }
+
+    private static class MethodReturnValueVisitor extends ModifierVisitor<Void> {
+
+        @Override
+        public Visitable visit(VariableDeclarator declarator, Void arg) {
+            if (declarator.getInitializer().isPresent()
+                    && declarator.getInitializer().get() instanceof MethodCallExpr) {
+
+                MethodCallExpr methodCall = (MethodCallExpr) declarator.getInitializer().get();
+                String varName = declarator.getNameAsString();
+
+                // Get parent statement and its containing block
+                ExpressionStmt parentStmt = getGrandParentStatement(declarator);
+
+                if (parentStmt != null) {
+                    BlockStmt block = (BlockStmt) parentStmt.getParentNode().orElseThrow();
+                    int stmtIndex = block.getStatements().indexOf(parentStmt);
+
+                    // Generate ORAM access with inlined method call
+                    StringLiteralExpr keyExpr = new StringLiteralExpr("return_" + varName);
+                    ResolvedType resolvedType = declarator.getType().resolve();
+
+                    // Directly use methodCall in the value conversion
+                    Expression byteArrayExpr = createByteArrayExpr(methodCall, resolvedType);
+
+                    // Build the ORAM access statement
+                    MethodCallExpr oramAccessCall = createORAMAccessMethodCall(
+                            keyExpr,
+                            new MethodCallExpr(new NameExpr("Optional"), "of", NodeList.nodeList(byteArrayExpr)),
+                            true
+                    );
+
+                    // Replace variable declaration with ORAM access
+                    block.getStatements().set(stmtIndex, new ExpressionStmt(oramAccessCall));
+                }
+            }
+            return super.visit(declarator, arg);
+        }
     }
 
     private static class ArraySizeVisitor extends VoidVisitorAdapter<Void> {
@@ -338,6 +424,7 @@ public class App {
         @Override
         public Visitable visit(VariableDeclarator n, Void arg) {
             if (n.getType() instanceof ArrayType) {
+                ArrayType arrayType = (ArrayType) n.getType();
                 Optional<Expression> initializer = n.getInitializer();
 
                 if (initializer.isPresent()) {
@@ -347,13 +434,28 @@ public class App {
                         return null;
                     } else if (expr instanceof MethodCallExpr) {
                         System.out.println("Variable initialized by a method call: " + n.getName());
+                        Type componentType = arrayType.getComponentType();
+                        ResolvedType resolvedElementType;
+                        try {
+                            resolvedElementType = componentType.resolve();
+                        } catch (Exception e) {
+                            System.err.println("Could not resolve component type for array: " + n.getName());
+                            return super.visit(n, arg);
+                        }
+
+                        // Create the ORAM write loop with the resolved element type
+                        ForStmt writeArrayToORAMStmt = createWriteArrayToORAM(
+                                n.getName().toString(),
+                                resolvedElementType
+                        );
+
+                        // Insert the loop after the variable declaration
                         Expression variableDeclExpr = (Expression) n.getParentNode().get();
                         ExpressionStmt variableDeclExprStmt = (ExpressionStmt) variableDeclExpr.getParentNode().get();
                         BlockStmt blockStmt = (BlockStmt) variableDeclExprStmt.getParentNode().get();
                         NodeList<Statement> stmts = blockStmt.getStatements();
                         int indexOfVariableDeclStmt = stmts.indexOf(variableDeclExprStmt);
 
-                        ForStmt writeArrayToORAMStmt = createWriteArrayToORAM(n.getName().toString());
                         stmts.add(indexOfVariableDeclStmt + 1, writeArrayToORAMStmt);
                     }
                 }
@@ -511,5 +613,17 @@ public class App {
         newStringExpr.setType("String");
         newStringExpr.addArgument(valueExpr);
         return newStringExpr;
+    }
+
+    private static ExpressionStmt getGrandParentStatement(VariableDeclarator declarator) {
+        Optional<Node> parent = declarator.getParentNode();
+        if (!parent.isPresent()) {
+            return null;
+        }
+
+        Optional<Node> grandParent = parent.get().getParentNode();
+        return (grandParent.isPresent() && grandParent.get() instanceof ExpressionStmt)
+                ? (ExpressionStmt) grandParent.get()
+                : null;
     }
 }
