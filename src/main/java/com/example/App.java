@@ -176,7 +176,7 @@ public class App {
 
             if (paramType.isArray()) {
                 ResolvedType elementType = paramType.asArrayType().getComponentType();
-                ForStmt loopStmt = createWriteArrayToORAM(paramName, elementType);
+                ForStmt loopStmt = ORAMUtils.createWriteArrayToORAM(paramName, elementType);
                 body.addStatement(insertIndex, loopStmt);
                 insertIndex++;
             } else {
@@ -193,47 +193,6 @@ public class App {
                 insertIndex++;
             }
         }
-    }
-
-    private static ForStmt createWriteArrayToORAM(String arrayName, ResolvedType elementType) {
-        ForStmt forStmt = new ForStmt();
-        VariableDeclarator iEqualsZero = new VariableDeclarator(PrimitiveType.intType(), "i",
-                new IntegerLiteralExpr("0"));
-        NodeList<Expression> initializationExprs = NodeList
-                .<Expression>nodeList(new VariableDeclarationExpr(iEqualsZero));
-        forStmt.setInitialization(initializationExprs);
-
-        BinaryExpr compareExpr = new BinaryExpr(
-                new NameExpr("i"),
-                new FieldAccessExpr(new NameExpr(arrayName), "length"),
-                BinaryExpr.Operator.LESS);
-        forStmt.setCompare(compareExpr);
-
-        UnaryExpr iIncrement = new UnaryExpr(new NameExpr("i"), UnaryExpr.Operator.POSTFIX_INCREMENT);
-        NodeList<Expression> updateExprs = NodeList.<Expression>nodeList(iIncrement);
-        forStmt.setUpdate(updateExprs);
-
-        Expression arrayAccessExpr = new ArrayAccessExpr(new NameExpr(arrayName), new NameExpr("i"));
-        Expression valueByteArrayExpr = ORAMUtils.createByteArrayExpr(arrayAccessExpr, elementType);
-        Expression optionalValueByteArrayExpr = new MethodCallExpr(
-                new NameExpr("Optional"),
-                "ofNullable",
-                NodeList.nodeList(valueByteArrayExpr));
-
-        MethodCallExpr stringValueOfCall = new MethodCallExpr(null, "String.valueOf",
-                NodeList.<Expression>nodeList(new NameExpr("i")));
-
-        StringLiteralExpr arrayNameAndOpenBracket = new StringLiteralExpr(arrayName + "[");
-        BinaryExpr firstPart = new BinaryExpr(arrayNameAndOpenBracket, stringValueOfCall,
-                BinaryExpr.Operator.PLUS);
-        StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
-        BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
-
-        MethodCallExpr oramAccessMethodCall = ORAMUtils.createORAMAccessMethodCall(blockIdExpr, optionalValueByteArrayExpr, true);
-        ExpressionStmt oramAccessStmt = new ExpressionStmt(oramAccessMethodCall);
-        forStmt.setBody(oramAccessStmt);
-
-        return forStmt;
     }
 
     private static FieldDeclaration createPathORAMFieldDeclaration(int numBlocks) {
@@ -470,100 +429,4 @@ public class App {
             return totalArraySize;
         }
     }
-
-    private static class ArrayMethodModifier extends ModifierVisitor<Void> {
-
-        private final Map<String, Expression> arrayLengths = new HashMap<>();
-        private final Set<String> arrayNamesToSkip = new HashSet<>(Arrays.asList("args"));
-
-        // Array initializers
-        // Do not remove the initializer yet because visit(FieldAccessExpr n, Void arg)
-        // expects the array variable to exist
-        @Override
-        public Visitable visit(VariableDeclarator n, Void arg) {
-            Optional<Expression> initializer = n.getInitializer();
-            String arrayName = n.getName().asString();
-
-            if (initializer.isPresent() && initializer.get() instanceof ArrayCreationExpr) {
-                ArrayCreationExpr arrayCreationExpr = (ArrayCreationExpr) initializer.get();
-                NodeList<ArrayCreationLevel> dimensions = arrayCreationExpr.getLevels();
-
-                if (!dimensions.isEmpty()) {
-                    ArrayCreationLevel firstDimension = dimensions.get(0);
-                    Optional<Expression> dimension = firstDimension.getDimension();
-                    Expression sizeExpression = dimension.get();
-                    arrayLengths.put(arrayName, sizeExpression);
-                }
-            }
-
-            return super.visit(n, arg);
-        }
-
-        // Array length
-        @Override
-        public Visitable visit(FieldAccessExpr n, Void arg) {
-            String fieldName = n.getName().asString();
-            if (fieldName.equals("length")) {
-                Expression scope = n.getScope();
-                ResolvedType scopeType = scope.calculateResolvedType();
-                if (scopeType.isArray()) {
-                    String arrayName = scope.toString();
-                    if (!arrayNamesToSkip.contains(arrayName) && arrayLengths.containsKey(arrayName)) {
-                        return arrayLengths.get(arrayName);
-                    }
-                }
-            }
-            return super.visit(n, arg);
-        }
-    }
-
-    private static class ArrayInitializerModifier extends ModifierVisitor<Void> {
-
-        // Only call this Visitor if you no longer need the array variables to exist
-        // Visitors that depend on array variables existing will not work if this
-        // Visitor is called before them
-        @Override
-        public Visitable visit(VariableDeclarator n, Void arg) {
-            if (n.getType() instanceof ArrayType) {
-                ArrayType arrayType = (ArrayType) n.getType();
-                Optional<Expression> initializer = n.getInitializer();
-
-                if (initializer.isPresent()) {
-                    Expression expr = initializer.get();
-                    if (expr instanceof ArrayCreationExpr) {
-                        // If initializing an array using 'new' keyword, remove the variable declaration
-                        return null;
-                    } else if (expr instanceof MethodCallExpr) {
-                        System.out.println("Variable initialized by a method call: " + n.getName());
-                        Type componentType = arrayType.getComponentType();
-                        ResolvedType resolvedElementType;
-                        try {
-                            resolvedElementType = componentType.resolve();
-                        } catch (Exception e) {
-                            System.err.println("Could not resolve component type for array: " + n.getName());
-                            return super.visit(n, arg);
-                        }
-
-                        // Create the ORAM write loop with the resolved element type
-                        ForStmt writeArrayToORAMStmt = createWriteArrayToORAM(
-                                n.getName().toString(),
-                                resolvedElementType
-                        );
-
-                        // Insert the loop after the variable declaration
-                        Expression variableDeclExpr = (Expression) n.getParentNode().get();
-                        ExpressionStmt variableDeclExprStmt = (ExpressionStmt) variableDeclExpr.getParentNode().get();
-                        BlockStmt blockStmt = (BlockStmt) variableDeclExprStmt.getParentNode().get();
-                        NodeList<Statement> stmts = blockStmt.getStatements();
-                        int indexOfVariableDeclStmt = stmts.indexOf(variableDeclExprStmt);
-
-                        stmts.add(indexOfVariableDeclStmt + 1, writeArrayToORAMStmt);
-                    }
-                }
-            }
-
-            return super.visit(n, arg);
-        }
-    }
-
 }
