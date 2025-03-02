@@ -26,7 +26,6 @@ import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.ArrayCreationExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
-import com.github.javaparser.ast.expr.BooleanLiteralExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
@@ -183,12 +182,12 @@ public class App {
             } else {
                 StringLiteralExpr keyExpr = new StringLiteralExpr(paramName);
                 Expression paramValueExpr = new NameExpr(paramName);
-                Expression byteArrayExpr = createByteArrayExpr(paramValueExpr, paramType);
+                Expression byteArrayExpr = ORAMUtils.createByteArrayExpr(paramValueExpr, paramType);
                 Expression optionalValueExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
                         "ofNullable",
                         NodeList.nodeList(byteArrayExpr));
-                MethodCallExpr oramAccessCall = createORAMAccessMethodCall(keyExpr, optionalValueExpr, true);
+                MethodCallExpr oramAccessCall = ORAMUtils.createORAMAccessMethodCall(keyExpr, optionalValueExpr, true);
                 ExpressionStmt stmt = new ExpressionStmt(oramAccessCall);
                 body.addStatement(insertIndex, stmt);
                 insertIndex++;
@@ -215,7 +214,7 @@ public class App {
         forStmt.setUpdate(updateExprs);
 
         Expression arrayAccessExpr = new ArrayAccessExpr(new NameExpr(arrayName), new NameExpr("i"));
-        Expression valueByteArrayExpr = createByteArrayExpr(arrayAccessExpr, elementType);
+        Expression valueByteArrayExpr = ORAMUtils.createByteArrayExpr(arrayAccessExpr, elementType);
         Expression optionalValueByteArrayExpr = new MethodCallExpr(
                 new NameExpr("Optional"),
                 "ofNullable",
@@ -230,7 +229,7 @@ public class App {
         StringLiteralExpr closingBracketLiteral = new StringLiteralExpr("]");
         BinaryExpr blockIdExpr = new BinaryExpr(firstPart, closingBracketLiteral, BinaryExpr.Operator.PLUS);
 
-        MethodCallExpr oramAccessMethodCall = createORAMAccessMethodCall(blockIdExpr, optionalValueByteArrayExpr, true);
+        MethodCallExpr oramAccessMethodCall = ORAMUtils.createORAMAccessMethodCall(blockIdExpr, optionalValueByteArrayExpr, true);
         ExpressionStmt oramAccessStmt = new ExpressionStmt(oramAccessMethodCall);
         forStmt.setBody(oramAccessStmt);
 
@@ -259,20 +258,6 @@ public class App {
         String fileName = filePath.getFileName().toString();
         String className = fileName.substring(0, fileName.lastIndexOf('.'));
         return className;
-    }
-
-    private static MethodCallExpr createORAMAccessMethodCall(Expression blockIdExpr, Expression valueExpr,
-            boolean isWrite) {
-
-        MethodCallExpr methodCall = new MethodCallExpr(
-                new NameExpr(ORAMConstants.ORAM_FIELD_NAME),
-                "access",
-                NodeList.nodeList(
-                        blockIdExpr,
-                        valueExpr,
-                        new BooleanLiteralExpr(isWrite)));
-
-        return methodCall;
     }
 
     private static class LocalVariableInitializationModifier extends ModifierVisitor<Void> {
@@ -315,10 +300,10 @@ public class App {
 
                             try {
                                 ResolvedType resolvedType = declarator.getType().resolve();
-                                Expression byteArrayExpr = createByteArrayExpr(initializer, resolvedType);
+                                Expression byteArrayExpr = ORAMUtils.createByteArrayExpr(initializer, resolvedType);
 
                                 // Build ORAM access
-                                MethodCallExpr oramAccessCall = createORAMAccessMethodCall(
+                                MethodCallExpr oramAccessCall = ORAMUtils.createORAMAccessMethodCall(
                                         keyExpr,
                                         new MethodCallExpr(
                                                 new NameExpr("Optional"),
@@ -375,14 +360,14 @@ public class App {
                     "empty")
                     .setTypeArguments(new ClassOrInterfaceType().setName("byte[]"));
 
-            MethodCallExpr accessMethodCall = createORAMAccessMethodCall(keyExpr, optionalEmptyExpr, false);
+            MethodCallExpr accessMethodCall = ORAMUtils.createORAMAccessMethodCall(keyExpr, optionalEmptyExpr, false);
             MethodCallExpr getMethodCall = new MethodCallExpr(accessMethodCall, "get");
 
             // Get variable type
             ResolvedType resolvedType;
             try {
                 resolvedType = n.calculateResolvedType();
-                Expression byteArrayParseExpr = createByteArrayDecodeExpr(getMethodCall, resolvedType);
+                Expression byteArrayParseExpr = ORAMUtils.createByteArrayDecodeExpr(getMethodCall, resolvedType);
                 return byteArrayParseExpr;
             } catch (Exception e) {
                 System.err.println("Could not resolve type for variable: " + varName);
@@ -413,7 +398,7 @@ public class App {
                 String varName = declarator.getNameAsString();
 
                 // Get parent statement and its containing block
-                ExpressionStmt parentStmt = getGrandParentStatement(declarator);
+                ExpressionStmt parentStmt = ORAMUtils.getGrandParentStatement(declarator);
 
                 if (parentStmt != null) {
                     BlockStmt block = (BlockStmt) parentStmt.getParentNode().orElseThrow();
@@ -424,10 +409,10 @@ public class App {
                     ResolvedType resolvedType = declarator.getType().resolve();
 
                     // Directly use methodCall in the value conversion
-                    Expression byteArrayExpr = createByteArrayExpr(methodCall, resolvedType);
+                    Expression byteArrayExpr = ORAMUtils.createByteArrayExpr(methodCall, resolvedType);
 
                     // Build the ORAM access statement
-                    MethodCallExpr oramAccessCall = createORAMAccessMethodCall(
+                    MethodCallExpr oramAccessCall = ORAMUtils.createORAMAccessMethodCall(
                             keyExpr,
                             new MethodCallExpr(new NameExpr("Optional"), "of", NodeList.nodeList(byteArrayExpr)),
                             true
@@ -597,14 +582,14 @@ public class App {
                         "empty")
                         .setTypeArguments(new ClassOrInterfaceType().setName("byte[]"));
 
-                MethodCallExpr accessMethodCall = createORAMAccessMethodCall(keyExpr, optionalEmptyExpr, false);
+                MethodCallExpr accessMethodCall = ORAMUtils.createORAMAccessMethodCall(keyExpr, optionalEmptyExpr, false);
                 MethodCallExpr getMethodCall = new MethodCallExpr(accessMethodCall, "get");
 
                 // Use the resolved type of the array access itself.
                 // For a[i] (with a as int[]) this returns int,
                 // while for a[i][j] (with a as int[][]) it returns int.
                 ResolvedType resolvedType = n.calculateResolvedType();
-                Expression byteArrayParseExpr = createByteArrayDecodeExpr(getMethodCall, resolvedType);
+                Expression byteArrayParseExpr = ORAMUtils.createByteArrayDecodeExpr(getMethodCall, resolvedType);
                 return byteArrayParseExpr;
             }
             return super.visit(n, arg);
@@ -621,14 +606,14 @@ public class App {
                 // Use the type of the full array access;
                 // e.g. for a[i][j] with a as int[][], we want the int conversion.
                 ResolvedType resolvedType = arrayAccessExpr.calculateResolvedType();
-                Expression valueByteArrayExpr = createByteArrayExpr(value, resolvedType);
+                Expression valueByteArrayExpr = ORAMUtils.createByteArrayExpr(value, resolvedType);
                 Expression optionalValueByteArrayExpr = new MethodCallExpr(
                         new NameExpr("Optional"),
                         "ofNullable",
                         NodeList.nodeList(valueByteArrayExpr));
 
                 Expression keyExpr = generateKeyExpression(arrayAccessExpr);
-                MethodCallExpr methodCall = createORAMAccessMethodCall(keyExpr, optionalValueByteArrayExpr, true);
+                MethodCallExpr methodCall = ORAMUtils.createORAMAccessMethodCall(keyExpr, optionalValueByteArrayExpr, true);
                 return methodCall;
             }
             return super.visit(n, arg);
@@ -674,72 +659,4 @@ public class App {
         }
     }
 
-    private static Expression createByteArrayExpr(Expression valueExpr, ResolvedType resolvedType) {
-        String typeDescription = resolvedType.describe();
-        System.out.println("createByteArrayExpr " + typeDescription);
-        // Support both 1d and element types for 2d arrays.
-        if (typeDescription.equals("int") || typeDescription.equals("int[]")) {
-            return createIntToByteArrayExpr(valueExpr);
-        } else if (typeDescription.equals("java.lang.String") || typeDescription.equals("java.lang.String[]")) {
-            return createStringToByteArrayExpr(valueExpr);
-        }
-        return valueExpr;
-    }
-
-    private static Expression createIntToByteArrayExpr(Expression valueExpr) {
-        // Equivalent to: ByteBuffer.allocate(4).putInt(valueExpr).array()
-        MethodCallExpr allocateCall = new MethodCallExpr(
-                new NameExpr("ByteBuffer"),
-                "allocate",
-                NodeList.<Expression>nodeList(new IntegerLiteralExpr("4"))
-        );
-        MethodCallExpr putIntCall = new MethodCallExpr(
-                allocateCall,
-                "putInt",
-                NodeList.<Expression>nodeList(valueExpr));
-        return new MethodCallExpr(putIntCall, "array");
-    }
-
-    private static Expression createStringToByteArrayExpr(Expression valueExpr) {
-        // Equivalent to: valueExpr.getBytes()
-        return new MethodCallExpr(valueExpr, "getBytes");
-    }
-
-    private static Expression createByteArrayDecodeExpr(Expression valueExpr, ResolvedType resolvedType) {
-        String typeDescription = resolvedType.describe();
-        System.out.println("createByteArrayDecodeExpr " + typeDescription);
-        if (typeDescription.equals("int") || typeDescription.equals("int[]")) {
-            return createByteArrayToIntExpr(valueExpr);
-        } else if (typeDescription.equals("java.lang.String") || typeDescription.equals("java.lang.String[]")) {
-            return createByteArrayToStringExpr(valueExpr);
-        }
-        return valueExpr;
-    }
-
-    private static Expression createByteArrayToIntExpr(Expression valueExpr) {
-        // Equivalent to: ByteBuffer.wrap(valueExpr).getInt()
-        MethodCallExpr wrapCall = new MethodCallExpr(
-                new NameExpr("ByteBuffer"), "wrap", NodeList.nodeList(valueExpr));
-        return new MethodCallExpr(wrapCall, "getInt");
-    }
-
-    private static Expression createByteArrayToStringExpr(Expression valueExpr) {
-        // Equivalent to: new String(valueExpr)
-        ObjectCreationExpr newStringExpr = new ObjectCreationExpr();
-        newStringExpr.setType("String");
-        newStringExpr.addArgument(valueExpr);
-        return newStringExpr;
-    }
-
-    private static ExpressionStmt getGrandParentStatement(VariableDeclarator declarator) {
-        Optional<Node> parent = declarator.getParentNode();
-        if (!parent.isPresent()) {
-            return null;
-        }
-
-        Optional<Node> grandParent = parent.get().getParentNode();
-        return (grandParent.isPresent() && grandParent.get() instanceof ExpressionStmt)
-                ? (ExpressionStmt) grandParent.get()
-                : null;
-    }
 }
