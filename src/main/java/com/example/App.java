@@ -4,10 +4,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -24,25 +22,18 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.ArrayCreationExpr;
-import com.github.javaparser.ast.expr.AssignExpr;
-import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
-import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
-import com.github.javaparser.ast.expr.UnaryExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ForStmt;
-import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ArrayType;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
-import com.github.javaparser.ast.type.PrimitiveType;
-import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.ast.visitor.VoidVisitor;
@@ -83,6 +74,10 @@ public class App {
         // Imports
         addImports(cu);
 
+        // Postfix and prefix operators
+        ModifierVisitor<?> unaryOpModifier = new UnaryOperatorModifier();
+        unaryOpModifier.visit(cu, null);
+
         // Array accesses
         ModifierVisitor<?> arrayAccessVisitor = new ArrayAccessModifier();
         arrayAccessVisitor.visit(cu, null);
@@ -97,8 +92,10 @@ public class App {
         ModifierVisitor<?> arrayInitializerModifier = new ArrayInitializerModifier();
         arrayInitializerModifier.visit(cu, null);
 
-        // ModifierVisitor<?> localVariableAccessVisitor = new LocalVariableAccessModifier();
-        // localVariableAccessVisitor.visit(cu, null);
+        // ModifierVisitor<?> variableWriteModifier = new com.example.LocalVariableAccessModifier();
+        // variableWriteModifier.visit(cu, null);
+        // ModifierVisitor<?> variableReadModifier = new LocalVariableReadModifier();
+        // variableReadModifier.visit(cu, null);
         // Local variable initializations
         // ModifierVisitor<?> localVariableInitializationVisitor = new LocalVariableInitializationModifier();
         // localVariableInitializationVisitor.visit(cu, null);
@@ -106,8 +103,6 @@ public class App {
         // Note: This needs to be after array access modifications so that args array
         // accesses **when inserting its elements into the ORAM tree** do not get
         // modified
-        String className = getClassNameFromPath(filePath);
-        ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
         // Optional<MethodDeclaration> maybeMainMethodDecl = getMainMethodFromClassDecl(classDeclaration);
         // if (maybeMainMethodDecl.isPresent()) {
         //     MethodDeclaration mainMethodDecl = maybeMainMethodDecl.get();
@@ -117,12 +112,6 @@ public class App {
         //     ForStmt writeArgsArrayToORAMStmt = createWriteArrayToORAM("args", argsElementType);
         //     mainMethodBody.getStatements().add(1, writeArgsArrayToORAMStmt);
         // }
-
-        // Add ORAM local variable to each method
-        for (MethodDeclaration method : classDeclaration.getMethods()) {
-            addORAMLocalVariableToMethod(method, oramSize);
-        }
-
         // For loops
         // Two pass approach which is encapsulated within ForLoopVisitor::transform
         ForLoopVisitor visitor = new ForLoopVisitor();
@@ -131,6 +120,23 @@ public class App {
         // If statements
         VoidVisitor<?> ifStmtVisitor = new IfStmtDummyVisitor();
         ifStmtVisitor.visit(cu, null);
+
+        // Get type info again
+        String modifiedCode = cu.toString();
+        cu = StaticJavaParser.parse(modifiedCode);
+
+        ModifierVisitor<?> localVariableReadModifier = new LocalVariableReadModifier();
+        localVariableReadModifier.visit(cu, null);
+
+        ModifierVisitor<?> localVariableWriteModifier = new LocalVariableWriteModifier();
+        localVariableWriteModifier.visit(cu, null);
+
+        String className = getClassNameFromPath(filePath);
+        ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
+        // Add ORAM local variable to each method
+        for (MethodDeclaration method : classDeclaration.getMethods()) {
+            addORAMLocalVariableToMethod(method, oramSize);
+        }
 
         // Method return values
         // ModifierVisitor<?> methodReturnVisitor = new MethodReturnValueVisitor();
@@ -288,7 +294,6 @@ public class App {
 
     private static class LocalVariableAccessModifier extends ModifierVisitor<Void> {
 
-        private final Set<String> variablesToSkip = new HashSet<>(Arrays.asList("i", "j", "k", ORAMConstants.ORAM_FIELD_NAME));
         private final Set<String> knownVars = new HashSet<>();
 
         @Override
@@ -302,8 +307,7 @@ public class App {
         public Visitable visit(NameExpr n, Void arg) {
             String varName = n.getNameAsString();
 
-            // Skip loop counters, ORAM field, or unknown variables
-            if (variablesToSkip.contains(varName) || !knownVars.contains(varName)) {
+            if (!knownVars.contains(varName)) {
                 return super.visit(n, arg);
             }
 
