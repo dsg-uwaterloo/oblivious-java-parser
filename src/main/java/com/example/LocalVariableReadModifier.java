@@ -9,6 +9,7 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.stmt.ForStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
@@ -19,13 +20,50 @@ class LocalVariableReadModifier extends ModifierVisitor<Void> {
     private Set<String> localVars = new HashSet<>();
 
     /*
+     * Visit for loop statement.
+     * Process initialization first, then condition, update, and body.
+     */
+    @Override
+    public Visitable visit(ForStmt n, Void arg) {
+        // Create a copy of the current localVars set to maintain scope
+        Set<String> savedLocalVars = new HashSet<>(localVars);
+
+        // Visit initialization first
+        for (Expression init : n.getInitialization()) {
+            init.accept(this, arg);
+        }
+
+        // Then visit condition, update, and body
+        if (n.getCompare().isPresent()) {
+            n.getCompare().get().accept(this, arg);
+        }
+
+        for (Expression update : n.getUpdate()) {
+            update.accept(this, arg);
+        }
+
+        n.getBody().accept(this, arg);
+
+        // Restore the original localVars set
+        localVars = savedLocalVars;
+
+        return n;
+    }
+
+    /*
     * Find variable declarations. Add to set of known local variables.
      */
     @Override
     public Visitable visit(VariableDeclarator n, Void arg) {
-        super.visit(n, arg);
+        // Add to localVars BEFORE visiting child nodes
+        String type = n.getTypeAsString();
+        // if (type.equals("int")) {
         localVars.add(n.getNameAsString());
-        return n;
+        // }
+        System.out.println("updated local vars: " + localVars.toString());
+
+        // Then visit child nodes
+        return super.visit(n, arg);
     }
 
     /*
@@ -38,6 +76,8 @@ class LocalVariableReadModifier extends ModifierVisitor<Void> {
         String name = n.getNameAsString();
 
         if (!localVars.contains(name) || isLeftSideOfAssignment(n)) {
+            System.out.println(name + " is not a local variable. Local vars:" + localVars.toString());
+            System.out.println("Parent " + n.getParentNode().toString());
             // This `name` is not a local variable
             return n;
         }
