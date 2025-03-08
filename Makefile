@@ -1,5 +1,6 @@
 MVN = mvn
 ARGS =
+CLASS =
 
 all: clean compile test package
 
@@ -15,7 +16,10 @@ test:
 package:
 	$(MVN) package
 
-run:
+transpile:
 	java -jar target/oblivious-java-parser-1.0-SNAPSHOT.jar $(ARGS)
+
+run:
+	java -cp src/main/java $(CLASS) $(ARGS)
 
 .PHONY: all clean compile test package run
