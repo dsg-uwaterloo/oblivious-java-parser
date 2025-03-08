@@ -9,6 +9,7 @@ import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.BooleanLiteralExpr;
+import com.github.javaparser.ast.expr.EnclosedExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
@@ -49,8 +50,15 @@ public class ORAMUtils {
     }
 
     static Expression createStringToByteArrayExpr(Expression valueExpr) {
-        // Equivalent to: valueExpr.getBytes()
-        return new MethodCallExpr(valueExpr, "getBytes");
+        // Wrap the valueExpr in parentheses first
+        // This is necessary for situations where the expression is a concatenation of strings such as
+        // str1 + str2
+        // Simply appending .getBytes() will only apply getBytes() to str2 instead of the concatenation
+        // e.g. str1 + str2.getBytes() !!! Trying to add a str and a byte[]
+        Expression parenthesizedExpr = new EnclosedExpr(valueExpr);
+
+        // Equivalent to: (valueExpr).getBytes()
+        return new MethodCallExpr(parenthesizedExpr, "getBytes");
     }
 
     static Expression createByteArrayDecodeExpr(Expression valueExpr, ResolvedType resolvedType) {
