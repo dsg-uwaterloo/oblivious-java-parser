@@ -127,10 +127,10 @@ public class App {
 
         ModifierVisitor<?> localVariableReadModifier = new LocalVariableReadModifier();
         localVariableReadModifier.visit(cu, null);
-
         ModifierVisitor<?> localVariableWriteModifier = new LocalVariableWriteModifier();
         localVariableWriteModifier.visit(cu, null);
-
+        ModifierVisitor<?> forLoopInitializerModifier = new ForLoopInitializerModifier();
+        forLoopInitializerModifier.visit(cu, null);
         String className = getClassNameFromPath(filePath);
         ClassOrInterfaceDeclaration classDeclaration = cu.getClassByName(className).orElseThrow();
         // Add ORAM local variable to each method
