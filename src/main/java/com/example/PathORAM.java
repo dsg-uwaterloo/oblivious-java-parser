@@ -9,6 +9,11 @@ import java.util.Optional;
 import java.util.Random;
 
 public class PathORAM {
+    // TODO: Try pessimistically big tree, measure how long each request takes
+    // TODO: Set tree size small and then check how long does resizing take
+    // TODO: Graph different stash upper bound thresholds
+    // TODO: Compare with related work (pros/cons) e.g. OBFUSCURO
+    // TODO: OpenTelemetry for measuring timing
 
     private final static int BUCKET_SIZE = 4;
     private final List<Bucket> tree = new ArrayList<>();
