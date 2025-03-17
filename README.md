@@ -1,6 +1,4 @@
-# Oblivious Java Parser
-
-Transpile non-oblivious Java source code to oblivious.
+# PhantomFlow: A source-to-source compiler for data-oblivious program transformation in Java
 
 ## Run sample class
 
