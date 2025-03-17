@@ -56,7 +56,6 @@ public class App {
         Path filePath = Paths.get(filePathStr);
 
         TypeSolver typeSolver = new ReflectionTypeSolver();
-
         JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
         StaticJavaParser
                 .getParserConfiguration()
@@ -64,11 +63,6 @@ public class App {
 
         CompilationUnit cu = StaticJavaParser.parse(Files.newInputStream(filePath));
 
-        // Output the total size of all arrays
-        // TODO: How to calculate ORAM size if array sizes depend on user input?
-        // ArraySizeVisitor arraySizeVisitor = new ArraySizeVisitor();
-        // cu.accept(arraySizeVisitor, null);
-        // int oramSize = arraySizeVisitor.getTotalArraySize();
         int oramSize = 1_048_576;
 
         // Imports
@@ -92,36 +86,15 @@ public class App {
         ModifierVisitor<?> arrayInitializerModifier = new ArrayInitializerModifier();
         arrayInitializerModifier.visit(cu, null);
 
-        // ModifierVisitor<?> variableWriteModifier = new com.example.LocalVariableAccessModifier();
-        // variableWriteModifier.visit(cu, null);
-        // ModifierVisitor<?> variableReadModifier = new LocalVariableReadModifier();
-        // variableReadModifier.visit(cu, null);
-        // Local variable initializations
-        // ModifierVisitor<?> localVariableInitializationVisitor = new LocalVariableInitializationModifier();
-        // localVariableInitializationVisitor.visit(cu, null);
-        // Args array
-        // Note: This needs to be after array access modifications so that args array
-        // accesses **when inserting its elements into the ORAM tree** do not get
-        // modified
-        // Optional<MethodDeclaration> maybeMainMethodDecl = getMainMethodFromClassDecl(classDeclaration);
-        // if (maybeMainMethodDecl.isPresent()) {
-        //     MethodDeclaration mainMethodDecl = maybeMainMethodDecl.get();
-        //     BlockStmt mainMethodBody = mainMethodDecl.getBody().orElseThrow();
-        //     ResolvedType argsType = mainMethodDecl.getParameter(0).getType().resolve();
-        //     ResolvedType argsElementType = argsType.asArrayType().getComponentType();
-        //     ForStmt writeArgsArrayToORAMStmt = createWriteArrayToORAM("args", argsElementType);
-        //     mainMethodBody.getStatements().add(1, writeArgsArrayToORAMStmt);
-        // }
         // For loops
-        // Two pass approach which is encapsulated within ForLoopVisitor::transform
         ForLoopVisitor visitor = new ForLoopVisitor();
-        visitor.transform(cu);
+        visitor.transform(cu); // Two pass approach which is encapsulated within ForLoopVisitor::transform
 
         // If statements
         VoidVisitor<?> ifStmtVisitor = new IfStmtDummyVisitor();
         ifStmtVisitor.visit(cu, null);
 
-        // Get type info again
+        // Re-generate type info
         String modifiedCode = cu.toString();
         cu = StaticJavaParser.parse(modifiedCode);
 
