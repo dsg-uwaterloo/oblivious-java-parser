@@ -9,12 +9,6 @@ import java.util.Optional;
 import java.util.Random;
 
 public class PathORAM {
-    // TODO: Try pessimistically big tree, measure how long each request takes
-    // TODO: Set tree size small and then check how long does resizing take
-    // TODO: Graph different stash upper bound thresholds
-    // TODO: Compare with related work (pros/cons) e.g. OBFUSCURO
-    // TODO: OpenTelemetry for measuring timing
-
     private final static int BUCKET_SIZE = 4;
     private final List<Bucket> tree = new ArrayList<>();
     private final HashMap<String, Integer> positionMap = new HashMap<>();
@@ -34,6 +28,7 @@ public class PathORAM {
     }
 
     public Optional<byte[]> access(String blockId, Optional<byte[]> newData, boolean isWrite) {
+        long startAccess = System.nanoTime();
         // Step 1: Remap block
         // (If blockId is not yet in the positionMap, assign it a random leaf.)
         Integer prevBlockPos = positionMap.getOrDefault(blockId, random.nextInt(1 << treeHeight) + 1);
@@ -57,14 +52,23 @@ public class PathORAM {
         writePath(prevBlockPos);
 
         // After the standard write, check if the stash has grown beyond a threshold.
+        boolean resized = false;
         if (stash.size() > 4 * BUCKET_SIZE * treeHeight) {
             resizeTree();
+            resized = true;
         }
 
+        long duration = System.nanoTime() - startAccess;
+        System.out.printf(
+                "{ \"timestamp\": %d, \"operation\": \"access\", \"duration_ns\": %d, \"blockId\": \"%s\", \"isWrite\": %b, \"treeHeight\": %d, \"stashSize\": %d, \"resized\": %b }%n",
+                System.currentTimeMillis(), duration, blockId, isWrite, treeHeight, stash.size(), resized
+        );
         return response;
     }
 
     private List<Block> readPath(int leafPos) {
+        long start = System.nanoTime();
+
         List<Block> blocksOnPath = new ArrayList<>();
         for (int level = 0; level < treeHeight; level++) {
             int bucketIdx = computeIdxOfBucketOnThisLevelOnPathToLeaf(level, leafPos);
@@ -76,10 +80,18 @@ public class PathORAM {
                 stash.put(block.id, block);
             }
         }
+
+        long duration = System.nanoTime() - start;
+        System.out.printf(
+                "{ \"timestamp\": %d, \"operation\": \"readPath\", \"duration_ns\": %d, \"treeHeight\": %d, \"leafPos\": %d }%n",
+                System.currentTimeMillis(), duration, treeHeight, leafPos
+        );
         return blocksOnPath;
     }
 
     private void writePath(int leafPos) {
+        long start = System.nanoTime();
+
         // For each level on the path from the root down to the leaf...
         for (int level = treeHeight - 1; level >= 0; level--) {
             int idxOfBucketOnThisLevelOnPathToLeaf = computeIdxOfBucketOnThisLevelOnPathToLeaf(level, leafPos);
@@ -115,6 +127,12 @@ public class PathORAM {
             // Update the tree with the new bucket
             tree.set(idxOfBucketOnThisLevelOnPathToLeaf - 1, newBucket);
         }
+
+        long duration = System.nanoTime() - start;
+        System.out.printf(
+                "{ \"timestamp\": %d, \"operation\": \"writePath\", \"duration_ns\": %d, \"treeHeight\": %d, \"leafPos\": %d }%n",
+                System.currentTimeMillis(), duration, treeHeight, leafPos
+        );
     }
 
     /**
@@ -127,6 +145,9 @@ public class PathORAM {
     }
 
     private void resizeTree() {
+        long start = System.nanoTime();
+        int oldTreeHeight = treeHeight;
+
         // Step 1: Gather all blocks (from both the tree and the stash)
         Map<String, Block> allBlocks = new HashMap<>();
         for (Bucket bucket : tree) {
@@ -164,6 +185,11 @@ public class PathORAM {
             readPath(leaf); // If the path is not read first, then previously inserted blocks will get lost (instead of being moved to the stack)
             writePath(leaf);
         }
+        long duration = System.nanoTime() - start;
+        System.out.printf(
+                "{ \"timestamp\": %d, \"operation\": \"resizeTree\", \"duration_ns\": %d, \"oldTreeHeight\": %d, \"newTreeHeight\": %d }%n",
+                System.currentTimeMillis(), duration, oldTreeHeight, treeHeight
+        );
     }
 
     public void prettyPrintTree() {
