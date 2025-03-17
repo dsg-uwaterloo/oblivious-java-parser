@@ -135,7 +135,8 @@ public class App {
             try {
                 paramType = param.getType().resolve();
             } catch (Exception e) {
-                System.err.println("Could not resolve type for parameter " + paramName + " in method " + method.getName());
+                System.err.println(
+                        "Could not resolve type for parameter " + paramName + " in method " + method.getName());
                 continue;
             }
 

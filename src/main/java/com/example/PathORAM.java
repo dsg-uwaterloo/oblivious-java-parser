@@ -16,6 +16,12 @@ public class PathORAM {
     private final Random random = new Random();
     private int treeHeight;
 
+    static {
+        // Print CSV headers once when class is loaded
+        System.out.println(
+                "timestamp,operation,duration_ns,blockId,isWrite,treeHeight,stashSize,resized,leafPos,oldTreeHeight,newTreeHeight");
+    }
+
     public PathORAM(int numBlocks) {
         // Compute tree height from the number of blocks (at least 1)
         this.treeHeight = Math.max(1, (int) Math.ceil(Math.log(numBlocks) / Math.log(2)));
@@ -60,9 +66,8 @@ public class PathORAM {
 
         long duration = System.nanoTime() - startAccess;
         System.out.printf(
-                "{ \"timestamp\": %d, \"operation\": \"access\", \"duration_ns\": %d, \"blockId\": \"%s\", \"isWrite\": %b, \"treeHeight\": %d, \"stashSize\": %d, \"resized\": %b }%n",
-                System.currentTimeMillis(), duration, blockId, isWrite, treeHeight, stash.size(), resized
-        );
+                "%d,resizeTree,%d,,,,,,,%d,%d%n",
+                System.currentTimeMillis(), duration, oldTreeHeight, treeHeight);
         return response;
     }
 
@@ -83,9 +88,8 @@ public class PathORAM {
 
         long duration = System.nanoTime() - start;
         System.out.printf(
-                "{ \"timestamp\": %d, \"operation\": \"readPath\", \"duration_ns\": %d, \"treeHeight\": %d, \"leafPos\": %d }%n",
-                System.currentTimeMillis(), duration, treeHeight, leafPos
-        );
+                "%d,readPath,%d,,,,%d,,%d,,%n",
+                System.currentTimeMillis(), duration, treeHeight, leafPos);
         return blocksOnPath;
     }
 
@@ -100,7 +104,8 @@ public class PathORAM {
             // Collect all stash blocks that belong to this bucket
             for (Map.Entry<String, Block> stashEntry : stash.entrySet()) {
                 Block block = stashEntry.getValue();
-                if (idxOfBucketOnThisLevelOnPathToLeaf == computeIdxOfBucketOnThisLevelOnPathToLeaf(level, positionMap.get(block.id))) {
+                if (idxOfBucketOnThisLevelOnPathToLeaf == computeIdxOfBucketOnThisLevelOnPathToLeaf(level,
+                        positionMap.get(block.id))) {
                     blocksForBucket.add(block);
                 }
             }
@@ -130,9 +135,8 @@ public class PathORAM {
 
         long duration = System.nanoTime() - start;
         System.out.printf(
-                "{ \"timestamp\": %d, \"operation\": \"writePath\", \"duration_ns\": %d, \"treeHeight\": %d, \"leafPos\": %d }%n",
-                System.currentTimeMillis(), duration, treeHeight, leafPos
-        );
+                "%d,writePath,%d,,,,%d,,%d,,%n",
+                System.currentTimeMillis(), duration, treeHeight, leafPos);
     }
 
     /**
@@ -171,7 +175,8 @@ public class PathORAM {
             tree.add(new Bucket());
         }
 
-        // Step 4: Clear the stash and assign each block a new random leaf (using the new tree height).
+        // Step 4: Clear the stash and assign each block a new random leaf (using the
+        // new tree height).
         stash.clear();
         for (Block block : allBlocks.values()) {
             int newLeaf = random.nextInt(1 << treeHeight);
@@ -182,14 +187,14 @@ public class PathORAM {
         // Step 5: Flush all blocks from the stash into the new tree.
         int numLeaves = 1 << treeHeight;
         for (int leaf = 0; leaf < numLeaves; leaf++) {
-            readPath(leaf); // If the path is not read first, then previously inserted blocks will get lost (instead of being moved to the stack)
+            readPath(leaf); // If the path is not read first, then previously inserted blocks will get lost
+                            // (instead of being moved to the stack)
             writePath(leaf);
         }
         long duration = System.nanoTime() - start;
         System.out.printf(
                 "{ \"timestamp\": %d, \"operation\": \"resizeTree\", \"duration_ns\": %d, \"oldTreeHeight\": %d, \"newTreeHeight\": %d }%n",
-                System.currentTimeMillis(), duration, oldTreeHeight, treeHeight
-        );
+                System.currentTimeMillis(), duration, oldTreeHeight, treeHeight);
     }
 
     public void prettyPrintTree() {
