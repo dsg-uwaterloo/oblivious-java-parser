@@ -63,5 +63,13 @@ public class SampleClass {
             }
             System.out.print('\n');
         }
+
+        // Function call example
+        int sum = add(date[0], date[1]);
+        System.out.println(sum);
+    }
+
+    private static int add(int a, int b) {
+        return a + b;
     }
 }
