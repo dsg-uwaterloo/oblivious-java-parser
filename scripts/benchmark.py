@@ -67,6 +67,9 @@ def plot_seq_len_vs_duration(metrics_file: TextIOWrapper, image_file: TextIOWrap
         df_program = df[df["program"] == program]
         plt.plot(df_program["seq_len"], df_program["duration"], label=program)
 
+    plt.xlabel("Sequence Length")
+    plt.ylabel("Duration (seconds)")
+    plt.title("Sequence Length vs Duration")
     plt.legend()
     plt.savefig(image_file)
 
@@ -78,9 +81,11 @@ def main():
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+    metrics_file_path = f"smith_waterman_metrics_{timestamp}.csv"
+
     with open(f"smith_waterman_output_{timestamp}.txt", "w") as output_file, \
         open(f"smith_waterman_error_{timestamp}.txt", "w") as error_file, \
-        open(f"smith_waterman_metrics_{timestamp}.csv", "w") as metrics_file:
+        open(metrics_file_path, "w") as metrics_file:
         for class_name in COMPARE:
             compile_java(class_name, output_file, error_file)
 
@@ -92,8 +97,7 @@ def main():
                 duration = run_java(program, (seq1, seq2), output_file, error_file)
                 metrics_file.write(f"{program},{len(seq1)},{duration}\n")
 
-        with open(f"smith_waterman_plot_{timestamp}.png", "w") as image_file:
-            plot_seq_len_vs_duration(metrics_file, image_file)
+    plot_seq_len_vs_duration(metrics_file_path, f"smith_waterman_plot_{timestamp}.png")
 
 
 
