@@ -1,13 +1,15 @@
-from datetime import datetime
-from io import TextIOWrapper
+import random
 import shlex
 import subprocess
 import sys
-import random
 import time
+from datetime import datetime
+from io import TextIOWrapper
 from typing import Generator, Tuple
+
 import matplotlib.pyplot as plt
 import pandas as pd
+
 
 def generate_test_sequence_pairs(max_length: int) -> Generator[Tuple[str, str], None, None]:
     if max_length < 1:
